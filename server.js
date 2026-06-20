@@ -29,8 +29,11 @@ const expirationWorker = require('./jobs/expirationWorker');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === SECURITY MIDDLEWARE ===
+// =========================
+// SECURITY MIDDLEWARE
+// =========================
 app.use(helmet());
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
@@ -38,10 +41,11 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 min
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000,
   max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
   message: { error: 'Too many requests, please try again later' },
 });
+
 app.use('/api/', limiter);
 
 // Body parsing
@@ -57,21 +61,30 @@ app.use((req, res, next) => {
   next();
 });
 
-// === STATIC FILES (Frontend) ===
+// =========================
+// STATIC FRONTEND
+// =========================
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-// === API ROUTES ===
+// =========================
+// API ROUTES
+// =========================
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/checkouts', checkoutRoutes);
+
+// 🔥 ESTA ERA A LINHA QUE IMPORTA PARA O TEU ERRO
 app.use('/api/payments', paymentRoutes);
+
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/upsell', upsellRoutes);
 app.use('/api/delivery', deliveryRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 
-// Health check
+// =========================
+// HEALTH CHECK
+// =========================
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -80,7 +93,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// === ERROR HANDLING ===
+// =========================
+// ERROR HANDLING
+// =========================
 app.use((err, req, res, next) => {
   errorsLogger.error('Unhandled error', {
     error: err.message,
@@ -88,15 +103,20 @@ app.use((err, req, res, next) => {
     path: req.path,
     method: req.method,
   });
+
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// 404 handler
+// =========================
+// 404 HANDLER
+// =========================
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// === START SERVER ===
+// =========================
+// START SERVER
+// =========================
 async function startServer() {
   try {
     app.listen(PORT, () => {
@@ -105,24 +125,27 @@ async function startServer() {
         corsOrigin: process.env.CORS_ORIGIN,
       });
 
-      // Start workers
+      // Workers
       if (process.env.ENABLE_WORKERS === 'true') {
-  paymentWorker.start();
-  deliveryWorker.start();
-  trackingWorker.start();
-  upsellWorker.start();
-  recoveryWorker.start();
-  expirationWorker.start();
-}
+        paymentWorker.start();
+        deliveryWorker.start();
+        trackingWorker.start();
+        upsellWorker.start();
+        recoveryWorker.start();
+        expirationWorker.start();
 
-      if (process.env.ENABLE_WORKERS === 'true') {
-  recoveryWorker.recoverSystem().catch(err => {
-    errorsLogger.error('Startup recovery failed', { error: err.message });
-  });
-}
+        recoveryWorker.recoverSystem().catch(err => {
+          errorsLogger.error('Startup recovery failed', {
+            error: err.message,
+          });
+        });
+      }
     });
   } catch (err) {
-    errorsLogger.error('Failed to start server', { error: err.message });
+    errorsLogger.error('Failed to start server', {
+      error: err.message,
+    });
+
     process.exit(1);
   }
 }
