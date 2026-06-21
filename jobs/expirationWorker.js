@@ -5,6 +5,7 @@ class ExpirationWorker {
   constructor() {
     this.interval = null;
     this.running = false;
+    this.processing = false; // 🔥 proteção anti-duplo run
   }
 
   start(intervalMs = 60000) {
@@ -32,14 +33,22 @@ class ExpirationWorker {
   }
 
   async expireOldSessions() {
+    if (this.processing) return; // 🔥 evita execução paralela
+
+    this.processing = true;
+
     try {
       const now = new Date().toISOString();
 
-      // Find all sessions that have expired
+      // 🔥 mais seguro: respeita ciclo de vida real
       const { data: expiredSessions, error } = await supabase
         .from('payment_sessions')
-        .select('id, status, expires_at')
+        .select('id, status, expires_at, created_at')
         .lt('expires_at', now)
+        .gte(
+          'created_at',
+          new Date(Date.now() - 10 * 60 * 1000).toISOString()
+        )
         .in('status', [
           'CREATED',
           'CHECKOUT_OPEN',
@@ -61,10 +70,12 @@ class ExpirationWorker {
           })
           .in('id', ids);
 
-        applicationLogger.info('Expired old sessions', { count: expiredSessions.length });
+        applicationLogger.info('Expired old sessions', {
+          count: expiredSessions.length
+        });
       }
 
-      // Also expire old deliveries
+      // 🔥 expirar deliveries antigas
       const { data: expiredDeliveries, error: delError } = await supabase
         .from('deliveries')
         .select('id')
@@ -81,16 +92,24 @@ class ExpirationWorker {
           .update({ status: 'expired' })
           .in('id', deliveryIds);
 
-        applicationLogger.info('Expired old deliveries', { count: expiredDeliveries.length });
+        applicationLogger.info('Expired old deliveries', {
+          count: expiredDeliveries.length
+        });
       }
 
       return {
         sessions: expiredSessions?.length || 0,
         deliveries: expiredDeliveries?.length || 0,
       };
+
     } catch (err) {
-      errorsLogger.error('Expire old sessions failed', { error: err.message });
+      errorsLogger.error('Expire old sessions failed', {
+        error: err.message
+      });
       throw err;
+
+    } finally {
+      this.processing = false; // 🔥 garante reset sempre
     }
   }
 }

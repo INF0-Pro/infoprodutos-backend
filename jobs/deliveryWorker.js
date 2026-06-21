@@ -6,6 +6,7 @@ class DeliveryWorker {
   constructor() {
     this.interval = null;
     this.running = false;
+    this.processing = false; // 🔥 evita execução paralela
   }
 
   start(intervalMs = 120000) {
@@ -33,12 +34,13 @@ class DeliveryWorker {
   }
 
   async processPendingDeliveries() {
+    if (this.processing) return; // 🔥 proteção contra overlap
+    this.processing = true;
+
     try {
-      // Find sessions that are PAYMENT_CONFIRMED, UPSELL_ACCEPTED, or UPSELL_DECLINED
-      // but don't have a delivery yet
       const { data: sessions, error } = await supabase
         .from('payment_sessions')
-        .select('*')
+        .select('id, status, delivery_unlocked_at, product_id, customer_email')
         .in('status', ['PAYMENT_CONFIRMED', 'UPSELL_ACCEPTED', 'UPSELL_DECLINED'])
         .is('delivery_unlocked_at', null)
         .order('created_at', { ascending: true })
@@ -46,23 +48,53 @@ class DeliveryWorker {
 
       if (error) throw error;
 
-      if (sessions && sessions.length > 0) {
-        applicationLogger.info('Processing pending deliveries', { count: sessions.length });
+      if (!sessions || sessions.length === 0) return;
 
-        for (const session of sessions) {
-          try {
-            await deliveryService.unlockDelivery(session.id);
-          } catch (err) {
-            errorsLogger.error('Failed to unlock delivery for session', {
-              sessionId: session.id,
-              error: err.message,
-            });
+      applicationLogger.info('Processing pending deliveries', {
+        count: sessions.length
+      });
+
+      for (const session of sessions) {
+        try {
+          // 🔥 IDEMPOTÊNCIA: evita duplicação
+          const { data: existing } = await supabase
+            .from('deliveries')
+            .select('id')
+            .eq('session_id', session.id)
+            .maybeSingle();
+
+          if (existing) {
+            // já foi entregue → sincroniza sessão
+            await supabase
+              .from('payment_sessions')
+              .update({
+                delivery_unlocked_at: new Date().toISOString(),
+                status: 'DELIVERED'
+              })
+              .eq('id', session.id);
+
+            continue;
           }
+
+          // 🔥 entrega real
+          await deliveryService.unlockDelivery(session.id);
+
+        } catch (err) {
+          errorsLogger.error('Delivery failed for session', {
+            sessionId: session.id,
+            error: err.message
+          });
         }
       }
+
     } catch (err) {
-      errorsLogger.error('Process pending deliveries failed', { error: err.message });
+      errorsLogger.error('Process pending deliveries failed', {
+        error: err.message
+      });
       throw err;
+
+    } finally {
+      this.processing = false;
     }
   }
 }

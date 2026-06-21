@@ -7,7 +7,9 @@ const path = require('path');
 
 const { applicationLogger, errorsLogger } = require('./config/logger');
 
-// Routes
+// =========================
+// ROUTES
+// =========================
 const authRoutes = require('./routes/authRoutes');
 const productRoutes = require('./routes/productRoutes');
 const checkoutRoutes = require('./routes/checkoutRoutes');
@@ -18,7 +20,12 @@ const deliveryRoutes = require('./routes/deliveryRoutes');
 const trackingRoutes = require('./routes/trackingRoutes');
 const diagnosticsRoutes = require('./routes/diagnosticsRoutes');
 
-// Workers
+// 🔥 PASSO 3 - PUBLIC CHECKOUT
+const publicCheckoutRoutes = require('./routes/publicCheckout');
+
+// =========================
+// WORKERS
+// =========================
 const paymentWorker = require('./jobs/paymentWorker');
 const deliveryWorker = require('./jobs/deliveryWorker');
 const trackingWorker = require('./jobs/trackingWorker');
@@ -30,7 +37,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // =========================
-// SECURITY MIDDLEWARE
+// SECURITY
 // =========================
 app.use(helmet());
 
@@ -39,7 +46,6 @@ app.use(cors({
   credentials: true,
 }));
 
-// Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000,
   max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
@@ -48,11 +54,15 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// Body parsing
+// =========================
+// BODY PARSER
+// =========================
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging
+// =========================
+// LOGGING
+// =========================
 app.use((req, res, next) => {
   applicationLogger.http(`${req.method} ${req.path}`, {
     ip: req.ip,
@@ -67,15 +77,16 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 // =========================
-// API ROUTES
+// ROUTES
 // =========================
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/checkouts', checkoutRoutes);
 
-// 🔥 ESTA ERA A LINHA QUE IMPORTA PARA O TEU ERRO
-app.use('/api/payments', paymentRoutes);
+// 🔥 PASSO 3 - CHECKOUT PÚBLICO AUTOMÁTICO
+app.use('/api/public/checkout', publicCheckoutRoutes);
 
+app.use('/api/payments', paymentRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/upsell', upsellRoutes);
 app.use('/api/delivery', deliveryRoutes);
@@ -94,7 +105,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // =========================
-// ERROR HANDLING
+// ERROR HANDLER
 // =========================
 app.use((err, req, res, next) => {
   errorsLogger.error('Unhandled error', {
@@ -125,7 +136,9 @@ async function startServer() {
         corsOrigin: process.env.CORS_ORIGIN,
       });
 
-      // Workers
+      // =========================
+      // WORKERS START
+      // =========================
       if (process.env.ENABLE_WORKERS === 'true') {
         paymentWorker.start();
         deliveryWorker.start();
