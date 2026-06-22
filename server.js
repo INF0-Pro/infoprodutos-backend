@@ -21,7 +21,7 @@ const trackingRoutes = require('./routes/trackingRoutes');
 const diagnosticsRoutes = require('./routes/diagnosticsRoutes');
 const funnelRoutes = require('./routes/funnelRoutes');
 
-// 🔥 PASSO 3 - PUBLIC CHECKOUT
+// 🔥 PUBLIC CHECKOUT
 const publicCheckoutRoutes = require('./routes/publicCheckout');
 
 // =========================
@@ -73,7 +73,7 @@ app.use((req, res, next) => {
 });
 
 // =========================
-// STATIC FRONTEND
+// STATIC
 // =========================
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
@@ -85,9 +85,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/checkouts', checkoutRoutes);
 app.use('/api/funnels', funnelRoutes);
-app.use('/api/dashboard', dashboardRoutes);
 
-// 🔥 PASSO 3 - CHECKOUT PÚBLICO AUTOMÁTICO
+// ❌ REMOVIDO: dashboardRoutes (não existe / estava a quebrar deploy)
+
 app.use('/api/public/checkout', publicCheckoutRoutes);
 
 app.use('/api/payments', paymentRoutes);
@@ -98,7 +98,7 @@ app.use('/api/tracking', trackingRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 
 // =========================
-// HEALTH CHECK
+// HEALTH
 // =========================
 app.get('/api/health', (req, res) => {
   res.json({
@@ -123,7 +123,7 @@ app.use((err, req, res, next) => {
 });
 
 // =========================
-// 404 HANDLER
+// 404
 // =========================
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -140,9 +140,6 @@ async function startServer() {
         corsOrigin: process.env.CORS_ORIGIN,
       });
 
-      // =========================
-      // WORKERS START
-      // =========================
       if (process.env.ENABLE_WORKERS === 'true') {
         paymentWorker.start();
         deliveryWorker.start();
