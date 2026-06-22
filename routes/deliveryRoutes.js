@@ -1,31 +1,33 @@
 const express = require('express');
 const router = express.Router();
+
 const deliveryService = require('../services/deliveryService');
 const trackingService = require('../services/trackingService');
 const { errorsLogger } = require('../config/logger');
 
-// GET /api/delivery/:token - Access delivery by token
+/**
+ * 📦 GET DELIVERY BY TOKEN
+ */
 router.get('/:token', async (req, res) => {
   try {
     const delivery = await deliveryService.getDeliveryByToken(req.params.token);
+
     if (!delivery) {
-      return res.status(404).json({ error: 'Delivery not found or invalid token' });
+      return res.status(404).json({ error: 'Invalid delivery token' });
     }
 
-    // Check if expired
     if (new Date(delivery.expires_at) < new Date()) {
-      return res.status(410).json({ error: 'Delivery link has expired' });
+      return res.status(410).json({ error: 'Delivery expired' });
     }
 
-    // Track event
-    await trackingService.trackEvent('delivery_opened', {
+    // tracking NÃO bloqueia UX
+    trackingService.trackEvent('delivery_opened', {
       session_id: delivery.session_id,
-      customer_email: delivery.customer_email,
       product_id: delivery.product_id,
       ip_address: req.ip,
-    });
+    }).catch(() => {});
 
-    res.json({
+    return res.json({
       id: delivery.id,
       session_id: delivery.session_id,
       content_type: delivery.content_type,
@@ -34,62 +36,93 @@ router.get('/:token', async (req, res) => {
       downloaded: !!delivery.downloaded_at,
       download_count: delivery.download_count || 0,
     });
+
   } catch (err) {
-    errorsLogger.error('Delivery access error', { error: err.message });
-    res.status(500).json({ error: 'Failed to access delivery' });
+    errorsLogger.error('Delivery access error', {
+      error: err.message,
+      token: req.params.token
+    });
+
+    return res.status(500).json({ error: 'Failed to access delivery' });
   }
 });
 
-// GET /api/delivery/:token/validate - Validate delivery token
+/**
+ * 🔐 VALIDATE TOKEN (SAFE VERSION)
+ */
 router.get('/:token/validate', async (req, res) => {
   try {
     const delivery = await deliveryService.getDeliveryByToken(req.params.token);
+
     if (!delivery) {
-      return res.status(404).json({ valid: false, reason: 'Token not found' });
+      return res.json({ valid: false, reason: 'not_found' });
     }
 
     if (new Date(delivery.expires_at) < new Date()) {
-      return res.status(410).json({ valid: false, reason: 'Token expired' });
+      return res.json({ valid: false, reason: 'expired' });
     }
 
-    res.json({ valid: true, delivery });
+    // NÃO expor delivery completo
+    return res.json({
+      valid: true,
+      content_type: delivery.content_type,
+      has_access: true
+    });
+
   } catch (err) {
-    errorsLogger.error('Delivery validation error', { error: err.message });
-    res.status(500).json({ valid: false, reason: 'Validation failed' });
+    errorsLogger.error('Delivery validation error', {
+      error: err.message
+    });
+
+    return res.status(500).json({
+      valid: false,
+      reason: 'server_error'
+    });
   }
 });
 
-// POST /api/delivery/:token/download - Record download
+/**
+ * 📥 DOWNLOAD TRACKING
+ */
 router.post('/:token/download', async (req, res) => {
   try {
     const delivery = await deliveryService.getDeliveryByToken(req.params.token);
+
     if (!delivery) {
-      return res.status(404).json({ error: 'Delivery not found' });
+      return res.status(404).json({ error: 'Invalid delivery' });
     }
 
     await deliveryService.recordDownload(delivery.id, req.ip);
 
-    await trackingService.trackEvent('product_downloaded', {
+    // tracking async safe
+    trackingService.trackEvent('product_downloaded', {
       session_id: delivery.session_id,
-      customer_email: delivery.customer_email,
       product_id: delivery.product_id,
       ip_address: req.ip,
-    });
+    }).catch(() => {});
 
-    // If content_type is 'link', redirect
-    if (delivery.content_type === 'link' && delivery.content_url) {
-      return res.json({ redirect: delivery.content_url });
+    // comportamento consistente
+    if (delivery.content_type === 'link') {
+      return res.json({
+        type: 'redirect',
+        url: delivery.content_url
+      });
     }
 
-    // If content_type is 'ebook', serve file or return URL
-    res.json({
+    return res.json({
+      type: 'download',
       content_type: delivery.content_type,
       content_url: delivery.content_url,
-      message: 'Download recorded',
+      message: 'Download recorded'
     });
+
   } catch (err) {
-    errorsLogger.error('Download error', { error: err.message });
-    res.status(500).json({ error: 'Failed to process download' });
+    errorsLogger.error('Download error', {
+      error: err.message,
+      token: req.params.token
+    });
+
+    return res.status(500).json({ error: 'Failed to process download' });
   }
 });
 

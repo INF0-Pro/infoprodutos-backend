@@ -8,14 +8,15 @@ const { applicationLogger, errorsLogger } = require('../config/logger');
 
 /**
  * GET /api/products
- * Lista todos os produtos ativos
+ * Lista apenas produtos ativos
  */
 router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('products')
       .select('*')
-      .order('id', { ascending: false }); // FIX: evitamos created_at
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
 
@@ -42,7 +43,7 @@ router.get('/:id', async (req, res) => {
       .eq('id', req.params.id)
       .single();
 
-    if (error) {
+    if (error || !data) {
       return res.status(404).json({
         error: 'Product not found',
       });
@@ -121,9 +122,9 @@ router.put('/:id', authenticateToken, validateProduct, async (req, res) => {
       .update(updates)
       .eq('id', req.params.id)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error) {
+    if (error || !data) {
       return res.status(404).json({
         error: 'Product not found',
       });
@@ -146,15 +147,17 @@ router.put('/:id', authenticateToken, validateProduct, async (req, res) => {
  */
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('products')
       .update({
         status: 'deleted',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', req.params.id);
+      .eq('id', req.params.id)
+      .select()
+      .single();
 
-    if (error) {
+    if (error || !data) {
       return res.status(404).json({
         error: 'Product not found',
       });
@@ -162,6 +165,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     return res.json({
       message: 'Product deleted',
+      product: data,
     });
   } catch (err) {
     errorsLogger.error('Failed to delete product', {

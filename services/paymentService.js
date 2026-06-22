@@ -33,6 +33,91 @@ class PaymentService {
   }
 
   /**
+   * 🔥 PASSO 5.4 — MATCH INTELIGENTE FINAL
+   */
+  resolveBestSession(sessions, webhookData) {
+    try {
+      const { sim_slot, payment_channel_id } = webhookData;
+
+      let best = null;
+      let bestScore = -Infinity;
+
+      for (const session of sessions) {
+        let score = 0;
+
+        if (
+          payment_channel_id &&
+          session.payment_channel_id === payment_channel_id
+        ) {
+          score += 1000;
+        }
+
+        if (sim_slot && session.sim_slot == sim_slot) {
+          score += 500;
+        }
+
+        const lastActivity = new Date(session.last_activity_at).getTime();
+        score += Math.floor(lastActivity / 100000000);
+
+        const created = new Date(session.created_at).getTime();
+        score += Math.floor(created / 100000000);
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = session;
+        }
+      }
+
+      return best;
+
+    } catch (err) {
+      errorsLogger.error('resolveBestSession failed', {
+        error: err.message
+      });
+
+      throw err;
+    }
+  }
+
+  /**
+   * 🔥 PASSO 5.5 — FINAL SAFETY CHECK
+   */
+  async finalSafetyCheck(session) {
+    try {
+      const now = Date.now();
+      const expiresAt = new Date(session.expires_at).getTime();
+
+      // ❌ sessão expirada
+      if (now > expiresAt) {
+        await this.transitionState(session.id, 'EXPIRED');
+
+        return {
+          ok: false,
+          reason: 'session_expired'
+        };
+      }
+
+      // ❌ já processada
+      if (session.status === 'PAYMENT_CONFIRMED') {
+        return {
+          ok: false,
+          reason: 'already_processed'
+        };
+      }
+
+      return { ok: true };
+
+    } catch (err) {
+      errorsLogger.error('finalSafetyCheck failed', {
+        error: err.message,
+        session_id: session.id
+      });
+
+      throw err;
+    }
+  }
+
+  /**
    * Create session
    */
   async createSession(data) {
@@ -60,7 +145,7 @@ class PaymentService {
         customer_phone: data.customer_phone || null,
         expected_amount: data.expected_amount,
         selected_order_bumps: data.selected_order_bumps || [],
-        status: 'CREATED',
+        status: 'WAITING_PAYMENT',
         score: 0,
         created_at: now,
         updated_at: now,
@@ -125,9 +210,6 @@ class PaymentService {
     }
   }
 
-  /**
-   * 🔥 PASSO 6.1 — LOCK ANTI-DUPLICAÇÃO
-   */
   async lockSession(sessionId) {
     try {
       const { data, error } = await supabase
@@ -141,7 +223,7 @@ class PaymentService {
         .single();
 
       if (error || !data) {
-        return null; // já está a ser processado
+        return null;
       }
 
       return data;
@@ -155,9 +237,6 @@ class PaymentService {
     }
   }
 
-  /**
-   * FSM transitions
-   */
   async transitionState(sessionId, newStatus) {
     const validTransitions = {
       CREATED: ['CHECKOUT_OPEN'],
@@ -178,9 +257,7 @@ class PaymentService {
     try {
       const session = await this.getSession(sessionId);
 
-      if (!session) {
-        throw new Error('Session not found');
-      }
+      if (!session) throw new Error('Session not found');
 
       const allowed = validTransitions[session.status] || [];
 
@@ -227,6 +304,68 @@ class PaymentService {
         sessionId,
         newStatus
       });
+      throw err;
+    }
+  }
+
+  /**
+   * 🔥 PASSO 5.2 — WEBHOOK PROCESSOR (ATUALIZADO)
+   */
+  async processPaymentWebhook(data) {
+    try {
+      const { amount } = data;
+
+      const { data: sessions, error } = await supabase
+        .from('payment_sessions')
+        .select('*')
+        .eq('status', 'WAITING_PAYMENT')
+        .eq('expected_amount', amount);
+
+      if (error) throw error;
+
+      if (!sessions || sessions.length === 0) {
+        return { status: 'no_match' };
+      }
+
+      if (sessions.length === 1) {
+        const session = sessions[0];
+
+        const safety = await this.finalSafetyCheck(session);
+        if (!safety.ok) {
+          return { status: 'blocked', reason: safety.reason };
+        }
+
+        await this.transitionState(session.id, 'PAYMENT_CONFIRMED');
+
+        return {
+          status: 'matched_single',
+          session_id: session.id
+        };
+      }
+
+      const best = this.resolveBestSession(sessions, data);
+
+      if (!best) {
+        return { status: 'no_best_match' };
+      }
+
+      const safety = await this.finalSafetyCheck(best);
+      if (!safety.ok) {
+        return { status: 'blocked', reason: safety.reason };
+      }
+
+      await this.transitionState(best.id, 'PAYMENT_CONFIRMED');
+
+      return {
+        status: 'matched',
+        session_id: best.id
+      };
+
+    } catch (err) {
+      errorsLogger.error('processPaymentWebhook failed', {
+        error: err.message
+      });
+
       throw err;
     }
   }

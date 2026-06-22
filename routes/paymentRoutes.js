@@ -1,13 +1,28 @@
 const express = require('express');
 const router = express.Router();
+
 const paymentService = require('../services/paymentService');
 const trackingService = require('../services/trackingService');
-const { authenticateToken, optionalAuth } = require('../middleware/auth');
+
+const { authenticateToken } = require('../middleware/auth');
 const { validatePaymentSession } = require('../middleware/validation');
 const { errorsLogger } = require('../config/logger');
 
-// POST /api/payments/session - Create payment session
-router.post('/session', optionalAuth, validatePaymentSession, async (req, res) => {
+/* ============================================================
+   SAFE TRACKING WRAPPER
+============================================================ */
+async function safeTrack(event, payload) {
+  try {
+    await trackingService.trackEvent(event, payload);
+  } catch (e) {
+    errorsLogger.error('Tracking failed', { error: e.message });
+  }
+}
+
+/* ============================================================
+   CREATE SESSION
+============================================================ */
+router.post('/session', validatePaymentSession, async (req, res) => {
   try {
     const session = await paymentService.createSession({
       product_id: req.body.product_id,
@@ -20,8 +35,7 @@ router.post('/session', optionalAuth, validatePaymentSession, async (req, res) =
       utm_data: req.body.utm_data,
     });
 
-    // Track event
-    await trackingService.trackEvent('payment_session_created', {
+    await safeTrack('payment_session_created', {
       session_id: session.id,
       customer_email: session.customer_email,
       product_id: session.product_id,
@@ -29,192 +43,213 @@ router.post('/session', optionalAuth, validatePaymentSession, async (req, res) =
     });
 
     res.status(201).json(session);
+
   } catch (err) {
     errorsLogger.error('Create session error', { error: err.message });
     res.status(400).json({ error: err.message || 'Failed to create session' });
   }
 });
 
-// POST /api/payments/session/:id/open - Open checkout
+/* ============================================================
+   OPEN CHECKOUT
+============================================================ */
 router.post('/session/:id/open', async (req, res) => {
   try {
+    if (!req.params.id) return res.status(400).json({ error: 'Invalid session id' });
+
     const session = await paymentService.openCheckout(req.params.id);
-    
-    await trackingService.trackEvent('checkout_opened', {
+
+    await safeTrack('checkout_opened', {
       session_id: session.id,
       customer_email: session.customer_email,
       ip_address: req.ip,
     });
 
     res.json(session);
+
   } catch (err) {
     errorsLogger.error('Open checkout error', { error: err.message });
     res.status(400).json({ error: err.message || 'Failed to open checkout' });
   }
 });
 
-// POST /api/payments/session/:id/start-payment - Start payment
+/* ============================================================
+   START PAYMENT
+============================================================ */
 router.post('/session/:id/start-payment', async (req, res) => {
   try {
     const session = await paymentService.startPayment(req.params.id);
     res.json(session);
   } catch (err) {
     errorsLogger.error('Start payment error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to start payment' });
+    res.status(400).json({ error: err.message || 'Failed' });
   }
 });
 
-// POST /api/payments/session/:id/wait-payment - Wait for payment
+/* ============================================================
+   WAIT PAYMENT
+============================================================ */
 router.post('/session/:id/wait-payment', async (req, res) => {
   try {
     const session = await paymentService.waitPayment(req.params.id);
     res.json(session);
   } catch (err) {
     errorsLogger.error('Wait payment error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to set waiting payment' });
+    res.status(400).json({ error: err.message || 'Failed' });
   }
 });
 
-// GET /api/payments/session/:id - Get session
+/* ============================================================
+   GET SESSION
+============================================================ */
 router.get('/session/:id', async (req, res) => {
   try {
     const session = await paymentService.getSession(req.params.id);
+
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
+
     res.json(session);
+
   } catch (err) {
     errorsLogger.error('Get session error', { error: err.message });
-    res.status(500).json({ error: 'Failed to get session' });
+    res.status(500).json({ error: 'Internal error' });
   }
 });
 
-// POST /api/payments/session/:id/copy-entity - Register entity copy
+/* ============================================================
+   COPY TRACKING
+============================================================ */
 router.post('/session/:id/copy-entity', async (req, res) => {
   try {
     const session = await paymentService.copyEntity(req.params.id);
-    
-    await trackingService.trackEvent('entity_copied', {
+
+    await safeTrack('entity_copied', {
       session_id: session.id,
       customer_email: session.customer_email,
-      product_id: session.product_id,
       ip_address: req.ip,
     });
 
     res.json(session);
+
   } catch (err) {
-    errorsLogger.error('Copy entity error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to register copy' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// POST /api/payments/session/:id/copy-reference - Register reference copy
 router.post('/session/:id/copy-reference', async (req, res) => {
   try {
     const session = await paymentService.copyReference(req.params.id);
-    
-    await trackingService.trackEvent('reference_copied', {
+
+    await safeTrack('reference_copied', {
       session_id: session.id,
-      customer_email: session.customer_email,
-      product_id: session.product_id,
       ip_address: req.ip,
     });
 
     res.json(session);
+
   } catch (err) {
-    errorsLogger.error('Copy reference error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to register copy' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// POST /api/payments/session/:id/copy-value - Register value copy
 router.post('/session/:id/copy-value', async (req, res) => {
   try {
     const session = await paymentService.copyValue(req.params.id);
-    
-    await trackingService.trackEvent('value_copied', {
+
+    await safeTrack('value_copied', {
       session_id: session.id,
-      customer_email: session.customer_email,
-      product_id: session.product_id,
       ip_address: req.ip,
     });
 
     res.json(session);
+
   } catch (err) {
-    errorsLogger.error('Copy value error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to register copy' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// POST /api/payments/session/:id/activity - Update activity
+/* ============================================================
+   ACTIVITY
+============================================================ */
 router.post('/session/:id/activity', async (req, res) => {
   try {
     const session = await paymentService.updateActivity(req.params.id);
     res.json(session);
   } catch (err) {
-    errorsLogger.error('Update activity error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to update activity' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// POST /api/payments/session/:id/expire - Force expire session
+/* ============================================================
+   EXPIRE
+============================================================ */
 router.post('/session/:id/expire', async (req, res) => {
   try {
     const session = await paymentService.forceExpire(req.params.id);
     res.json(session);
   } catch (err) {
-    errorsLogger.error('Force expire error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to expire session' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// GET /api/payments/review-required - List sessions needing review (admin)
+/* ============================================================
+   ADMIN - REVIEW
+============================================================ */
 router.get('/review-required', authenticateToken, async (req, res) => {
   try {
     const sessions = await paymentService.getReviewRequiredSessions();
     res.json(sessions);
   } catch (err) {
-    errorsLogger.error('List review required error', { error: err.message });
-    res.status(500).json({ error: 'Failed to list review sessions' });
+    res.status(500).json({ error: 'Failed to load review sessions' });
   }
 });
 
-// POST /api/payments/session/:id/resolve-review - Resolve a review (admin)
+/* ============================================================
+   ADMIN - RESOLVE REVIEW
+============================================================ */
 router.post('/session/:id/resolve-review', authenticateToken, async (req, res) => {
   try {
     const { action, justification } = req.body;
-    if (!action || !['confirm', 'cancel', 'fail'].includes(action)) {
-      return res.status(400).json({ error: 'Action must be: confirm, cancel, or fail' });
-    }
-    if (!justification || justification.trim().length < 10) {
-      return res.status(400).json({ error: 'Justification required (min 10 characters)' });
+
+    if (!['confirm', 'fail'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action' });
     }
 
-    const session = await paymentService.resolveReview(req.params.id, action, justification);
+    if (!justification || justification.length < 10) {
+      return res.status(400).json({ error: 'Justification required' });
+    }
+
+    const session = await paymentService.resolveReview(
+      req.params.id,
+      action,
+      justification
+    );
+
     res.json(session);
+
   } catch (err) {
-    errorsLogger.error('Resolve review error', { error: err.message });
-    res.status(400).json({ error: err.message || 'Failed to resolve review' });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// GET /api/payments/sessions - List sessions (admin)
+/* ============================================================
+   ADMIN - LIST SESSIONS
+============================================================ */
 router.get('/sessions', authenticateToken, async (req, res) => {
   try {
-    const filters = {
+    const result = await paymentService.listSessions({
       status: req.query.status,
       email: req.query.email,
       product_id: req.query.product_id,
-      start_date: req.query.start_date,
-      end_date: req.query.end_date,
       limit: parseInt(req.query.limit) || 20,
       offset: parseInt(req.query.offset) || 0,
-    };
+    });
 
-    const result = await paymentService.listSessions(filters);
     res.json(result);
+
   } catch (err) {
-    errorsLogger.error('List sessions error', { error: err.message });
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });

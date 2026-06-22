@@ -4,57 +4,116 @@ const router = express.Router();
 const checkoutService = require('../services/checkoutService');
 const { authenticateToken } = require('../middleware/auth');
 const { validateCheckout } = require('../middleware/validation');
-const { errorsLogger } = require('../config/logger');
+const { errorsLogger, applicationLogger } = require('../config/logger');
 
-// GET all
-router.get('/', async (req, res) => {
+/**
+ * 📋 LISTAR CHECKOUTS (ADMIN)
+ */
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const data = await checkoutService.list();
-    res.json(data);
+
+    return res.json(data);
   } catch (err) {
-    errorsLogger.error(err.message);
-    res.status(500).json({ error: 'Failed to list checkouts' });
+    errorsLogger.error('Checkout list error', {
+      error: err.message,
+      route: '/checkouts'
+    });
+
+    return res.status(500).json({ error: 'Failed to list checkouts' });
   }
 });
 
-// GET by id
-router.get('/:id', async (req, res) => {
+/**
+ * 🔍 GET CHECKOUT BY ID
+ */
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const data = await checkoutService.getById(req.params.id);
-    if (!data) return res.status(404).json({ error: 'Checkout not found' });
-    res.json(data);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Checkout not found' });
+    }
+
+    return res.json(data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to get checkout' });
+    errorsLogger.error('Checkout get error', {
+      error: err.message,
+      checkoutId: req.params.id
+    });
+
+    return res.status(500).json({ error: 'Failed to get checkout' });
   }
 });
 
-// CREATE
+/**
+ * ➕ CREATE CHECKOUT
+ */
 router.post('/', authenticateToken, validateCheckout, async (req, res) => {
   try {
     const data = await checkoutService.create(req.body);
-    res.status(201).json(data);
+
+    applicationLogger.info('Checkout created', {
+      checkoutId: data?.id,
+      name: data?.name
+    });
+
+    return res.status(201).json(data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create checkout' });
+    errorsLogger.error('Checkout create error', {
+      error: err.message,
+      body: req.body
+    });
+
+    return res.status(500).json({ error: 'Failed to create checkout' });
   }
 });
 
-// UPDATE
+/**
+ * ✏️ UPDATE CHECKOUT
+ */
 router.put('/:id', authenticateToken, validateCheckout, async (req, res) => {
   try {
     const data = await checkoutService.update(req.params.id, req.body);
-    res.json(data);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Checkout not found' });
+    }
+
+    return res.json(data);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update checkout' });
+    errorsLogger.error('Checkout update error', {
+      error: err.message,
+      checkoutId: req.params.id
+    });
+
+    return res.status(500).json({ error: 'Failed to update checkout' });
   }
 });
 
-// DELETE
+/**
+ * 🗑 DELETE CHECKOUT (SOFT SAFE)
+ */
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
-    await checkoutService.delete(req.params.id);
-    res.json({ message: 'Checkout deleted' });
+    const result = await checkoutService.delete(req.params.id);
+
+    if (!result) {
+      return res.status(404).json({ error: 'Checkout not found' });
+    }
+
+    return res.json({
+      message: 'Checkout deleted',
+      id: req.params.id
+    });
+
   } catch (err) {
-    res.status(500).json({ error: 'Failed to delete checkout' });
+    errorsLogger.error('Checkout delete error', {
+      error: err.message,
+      checkoutId: req.params.id
+    });
+
+    return res.status(500).json({ error: 'Failed to delete checkout' });
   }
 });
 

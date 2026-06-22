@@ -1,51 +1,112 @@
 const express = require('express');
 const router = express.Router();
+
 const authService = require('../services/authService');
 const { authenticateToken } = require('../middleware/auth');
 const { validateLogin } = require('../middleware/validation');
 const { applicationLogger, errorsLogger } = require('../config/logger');
 
-// POST /api/auth/login
+/**
+ * 🔐 LOGIN
+ */
 router.post('/login', validateLogin, async (req, res) => {
   try {
     const { email, password } = req.body;
+
     const result = await authService.login(email, password);
-    res.json(result);
+
+    applicationLogger.info('User login success', {
+      userId: result?.user?.id,
+      email
+    });
+
+    return res.json(result);
+
   } catch (err) {
-    errorsLogger.error('Login route error', { error: err.message });
-    res.status(401).json({ error: err.message || 'Login failed' });
+    const isAuthError = err.message?.toLowerCase().includes('invalid');
+
+    errorsLogger.error('Login error', {
+      error: err.message,
+      email
+    });
+
+    return res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'Invalid credentials' : 'Login failed'
+    });
   }
 });
 
-// POST /api/auth/refresh
+/**
+ * 🔄 REFRESH TOKEN
+ */
 router.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
+
     if (!refreshToken) {
       return res.status(400).json({ error: 'Refresh token required' });
     }
+
     const result = await authService.refreshAccessToken(refreshToken);
-    res.json(result);
+
+    applicationLogger.info('Token refreshed', {
+      userId: result?.user?.id
+    });
+
+    return res.json(result);
+
   } catch (err) {
-    errorsLogger.error('Refresh route error', { error: err.message });
-    res.status(401).json({ error: err.message || 'Token refresh failed' });
+    errorsLogger.error('Refresh error', {
+      error: err.message
+    });
+
+    return res.status(401).json({
+      error: 'Invalid refresh token'
+    });
   }
 });
 
-// POST /api/auth/logout
+/**
+ * 🚪 LOGOUT
+ */
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
     await authService.logout(req.user.id);
-    res.json({ message: 'Logged out successfully' });
+
+    applicationLogger.info('User logout', {
+      userId: req.user.id
+    });
+
+    return res.json({ message: 'Logged out successfully' });
+
   } catch (err) {
-    errorsLogger.error('Logout route error', { error: err.message });
-    res.status(500).json({ error: 'Logout failed' });
+    errorsLogger.error('Logout error', {
+      error: err.message,
+      userId: req.user?.id
+    });
+
+    return res.status(500).json({ error: 'Logout failed' });
   }
 });
 
-// GET /api/auth/me
+/**
+ * 👤 ME (REFRESHED OPTIONAL)
+ */
 router.get('/me', authenticateToken, async (req, res) => {
-  res.json({ user: req.user });
+  try {
+    // opcional: garantir dados frescos do DB
+    const user = await authService.getUserById(req.user.id);
+
+    return res.json({ user });
+
+  } catch (err) {
+    errorsLogger.error('Me error', {
+      error: err.message,
+      userId: req.user?.id
+    });
+
+    return res.status(500).json({ error: 'Failed to get user' });
+  }
 });
 
 module.exports = router;

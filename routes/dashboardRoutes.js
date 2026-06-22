@@ -4,37 +4,41 @@ const { supabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 /**
- * 📊 OVERVIEW DO SISTEMA
- * KPI principais
+ * 📊 OVERVIEW DO SISTEMA (KPIs)
  */
 router.get('/overview', authenticateToken, async (req, res) => {
   try {
     const now = new Date().toISOString();
 
-    const [
-      created,
-      waiting,
-      confirmed,
-      expired,
-      review
-    ] = await Promise.all([
-      supabase.from('payment_sessions').select('id', { count: 'exact' }).eq('status', 'CREATED'),
-      supabase.from('payment_sessions').select('id', { count: 'exact' }).eq('status', 'WAITING_PAYMENT'),
-      supabase.from('payment_sessions').select('id', { count: 'exact' }).eq('status', 'PAYMENT_CONFIRMED'),
-      supabase.from('payment_sessions').select('id', { count: 'exact' }).eq('status', 'EXPIRED'),
-      supabase.from('payment_sessions').select('id', { count: 'exact' }).eq('status', 'REVIEW_REQUIRED'),
-    ]);
+    const statuses = [
+      'CREATED',
+      'WAITING_PAYMENT',
+      'PAYMENT_CONFIRMED',
+      'EXPIRED',
+      'REVIEW_REQUIRED'
+    ];
+
+    const queries = await Promise.all(
+      statuses.map(status =>
+        supabase
+          .from('payment_sessions')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', status)
+      )
+    );
+
+    const result = statuses.reduce((acc, status, index) => {
+      acc[status.toLowerCase()] = queries[index].count || 0;
+      return acc;
+    }, {});
 
     res.json({
-      created: created.count || 0,
-      waiting: waiting.count || 0,
-      confirmed: confirmed.count || 0,
-      expired: expired.count || 0,
-      review: review.count || 0,
+      ...result,
       timestamp: now
     });
 
   } catch (err) {
+    console.error('Overview error:', err);
     res.status(500).json({ error: 'Failed to load overview' });
   }
 });
@@ -44,7 +48,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
  */
 router.get('/sessions', authenticateToken, async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
 
     const { data, error } = await supabase
       .from('payment_sessions')
@@ -55,8 +59,8 @@ router.get('/sessions', authenticateToken, async (req, res) => {
     if (error) throw error;
 
     res.json(data || []);
-
   } catch (err) {
+    console.error('Sessions error:', err);
     res.status(500).json({ error: 'Failed to load sessions' });
   }
 });
@@ -75,8 +79,8 @@ router.get('/review', authenticateToken, async (req, res) => {
     if (error) throw error;
 
     res.json(data || []);
-
   } catch (err) {
+    console.error('Review error:', err);
     res.status(500).json({ error: 'Failed to load review sessions' });
   }
 });

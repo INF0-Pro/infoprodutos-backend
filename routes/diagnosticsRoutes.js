@@ -4,33 +4,42 @@ const router = express.Router();
 const { supabase } = require('../config/database');
 const { applicationLogger, errorsLogger } = require('../config/logger');
 
-// GET /api/diagnostics
+/**
+ * 🧪 DIAGNOSTICS SYSTEM
+ */
 router.get('/', async (req, res) => {
+  const start = Date.now();
+
   const results = {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
-    workers_enabled: process.env.ENABLE_WORKERS === 'true',
     checks: {},
   };
 
-  // Supabase check
   try {
-    const { error } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true });
+    /**
+     * 🔌 Supabase connectivity (lightweight)
+     */
+    const { error: connError } = await supabase
+      .from('products')
+      .select('id', { head: true, count: 'exact' })
+      .limit(1);
 
-    results.checks.supabase_connection = {
-      status: error ? 'error' : 'ok',
-      message: error ? error.message : 'Connected successfully',
+    results.checks.supabase = {
+      status: connError ? 'error' : 'ok',
+      message: connError?.message || 'Connected'
     };
+
   } catch (err) {
-    results.checks.supabase_connection = {
+    results.checks.supabase = {
       status: 'error',
-      message: err.message,
+      message: err.message
     };
   }
 
-  // Tables check
+  /**
+   * 📊 Table existence check (lightweight version)
+   */
   const tables = [
     'users',
     'products',
@@ -38,9 +47,7 @@ router.get('/', async (req, res) => {
     'payment_sessions',
     'deliveries',
     'upsells',
-    'order_bumps',
-    'tracking_events',
-    'audit_log'
+    'tracking_events'
   ];
 
   results.checks.tables = {};
@@ -49,21 +56,23 @@ router.get('/', async (req, res) => {
     try {
       const { error } = await supabase
         .from(table)
-        .select('*', { count: 'exact', head: true });
+        .select('id', { head: true })
+        .limit(1);
 
       results.checks.tables[table] = {
-        status: error ? 'error' : 'ok',
-        message: error ? error.message : 'OK',
+        status: error ? 'error' : 'ok'
       };
+
     } catch (err) {
       results.checks.tables[table] = {
-        status: 'error',
-        message: err.message,
+        status: 'error'
       };
     }
   }
 
-  // Env check
+  /**
+   * ⚙️ Environment validation (improved)
+   */
   const requiredVars = [
     'SUPABASE_URL',
     'SUPABASE_SERVICE_ROLE_KEY',
@@ -74,20 +83,38 @@ router.get('/', async (req, res) => {
   results.checks.environment = {};
 
   for (const v of requiredVars) {
+    const value = process.env[v];
+
     results.checks.environment[v] = {
-      status: process.env[v] ? 'ok' : 'missing'
+      status: value ? 'ok' : 'missing',
+      valid: value ? value.length > 10 : false
     };
   }
 
-  results.overall_status = Object.values(results.checks).every(c =>
-    typeof c === 'object' && c.status === 'ok'
-  )
-    ? 'healthy'
-    : 'degraded';
+  /**
+   * 📌 FIXED overall status logic
+   */
+  const tableStatusOk = Object.values(results.checks.tables)
+    .every(t => t.status === 'ok');
 
-  applicationLogger.info('Diagnostics check executed');
+  const envStatusOk = Object.values(results.checks.environment)
+    .every(e => e.status === 'ok');
 
-  res.json(results);
+  const dbStatusOk = results.checks.supabase.status === 'ok';
+
+  results.overall_status =
+    dbStatusOk && tableStatusOk && envStatusOk
+      ? 'healthy'
+      : 'degraded';
+
+  results.duration_ms = Date.now() - start;
+
+  applicationLogger.info('Diagnostics executed', {
+    status: results.overall_status,
+    duration_ms: results.duration_ms
+  });
+
+  return res.json(results);
 });
 
 module.exports = router;

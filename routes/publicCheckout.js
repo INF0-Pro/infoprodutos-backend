@@ -3,6 +3,7 @@ const router = express.Router();
 const { supabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const PaymentService = require('../services/paymentService');
+const trackingService = require('../services/trackingService');
 
 /**
  * PUBLIC CHECKOUT
@@ -17,7 +18,7 @@ router.get('/:checkoutId', async (req, res) => {
       .from('checkouts')
       .select('*, products:product_id(name, price)')
       .eq('id', checkoutId)
-      .single();
+      .maybeSingle();
 
     if (error || !checkout) {
       return res.status(404).json({ error: 'Checkout not found' });
@@ -27,22 +28,35 @@ router.get('/:checkoutId', async (req, res) => {
       return res.status(400).json({ error: 'Checkout is not active' });
     }
 
-    // 2. Criar sessão automaticamente
+    const amount = checkout.products?.price;
+
+    if (typeof amount !== 'number') {
+      return res.status(500).json({ error: 'Invalid product price configuration' });
+    }
+
+    // 2. Criar sessão
     const session = await PaymentService.createSession({
       checkout_id: checkout.id,
       product_id: checkout.product_id,
 
-      // ⚠️ sessão “anónima” (vai ser preenchida depois no frontend se quiseres)
-      customer_name: 'guest',
-      customer_email: `guest_${uuidv4()}@temp.local`,
+      customer_name: null,
+      customer_email: `guest_${uuidv4()}@system.local`,
       customer_phone: null,
 
-      expected_amount: checkout.products?.price || 0,
+      expected_amount: amount,
       selected_order_bumps: [],
-      utm_data: null,
+      utm_data: req.query || {},
+      is_guest: true,
     });
 
-    // 3. Resposta pronta para frontend
+    // 3. tracking (IMPORTANTE para funil)
+    await trackingService.trackEvent('public_checkout_loaded', {
+      session_id: session.id,
+      checkout_id: checkout.id,
+      product_id: checkout.product_id,
+      ip_address: req.ip,
+    });
+
     return res.json({
       checkout: {
         id: checkout.id,
@@ -62,7 +76,7 @@ router.get('/:checkoutId', async (req, res) => {
       payment: {
         entity: checkout.entity,
         reference: checkout.reference,
-        amount: checkout.products?.price || 0,
+        amount,
       }
     });
 
