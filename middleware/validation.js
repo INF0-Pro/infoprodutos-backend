@@ -24,18 +24,33 @@ const validateProduct = [
   body('name').trim().notEmpty().withMessage('Product name is required'),
   body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
   body('description').optional().trim(),
-  body('content_type').isIn(['ebook', 'link', 'video', 'course']).withMessage('Invalid content type'),
+  body('content_type').isIn(['ebook', 'link', 'download', 'video', 'course']).withMessage('Invalid content type'),
   body('content_url').optional().trim(),
+  body('cover_url').optional().trim(),
+  body('default_checkout_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid default checkout ID required'),
+  body('checkout_ids').optional().isArray().withMessage('checkout_ids must be an array'),
+  body('checkout_ids.*').optional().isUUID().withMessage('Valid checkout ID required'),
+  body('upsell_product_ids').optional().isArray().withMessage('upsell_product_ids must be an array'),
+  body('upsell_product_ids.*').optional().isUUID().withMessage('Valid upsell product ID required'),
+  body('downsell_product_ids').optional().isArray().withMessage('downsell_product_ids must be an array'),
+  body('downsell_product_ids.*').optional().isUUID().withMessage('Valid downsell product ID required'),
+  body('order_bump_product_ids').optional().isArray().withMessage('order_bump_product_ids must be an array'),
+  body('order_bump_product_ids.*').optional().isUUID().withMessage('Valid order bump product ID required'),
+  body('status').optional().isIn(['active', 'pending', 'inactive']).withMessage('Invalid product status'),
   handleValidationErrors,
 ];
 
 const validateCheckout = [
   body('name').trim().notEmpty().withMessage('Checkout name is required'),
-  body('product_id').isUUID().withMessage('Valid product ID required'),
+  body('product_id').optional({ nullable: true, checkFalsy: true }).isUUID().withMessage('Valid product ID required'),
+  body('product_ids').optional().isArray().withMessage('product_ids must be an array'),
+  body('product_ids.*').optional().isUUID().withMessage('Valid product ID required'),
   body('entity').trim().notEmpty().withMessage('Entity is required'),
   body('reference').trim().notEmpty().withMessage('Reference is required'),
   body('checkout_template').optional().trim(),
   body('payment_template').optional().trim(),
+  body('is_default').optional().isBoolean().withMessage('is_default must be boolean'),
+  body('status').optional().isIn(['active', 'inactive']).withMessage('Invalid checkout status'),
   handleValidationErrors,
 ];
 
@@ -51,8 +66,8 @@ const validatePaymentSession = [
 
 const validateWebhook = [
   body('amount').isFloat({ min: 0 }).withMessage('Amount must be positive'),
-  body('entity').trim().notEmpty().withMessage('Entity is required'),
-  body('reference').trim().notEmpty().withMessage('Reference is required'),
+  body('entity').optional().trim(),
+  body('reference').optional().trim(),
   body('received_at').isISO8601().withMessage('Valid ISO date required'),
   body('raw_message').optional().trim(),
   body('sender').optional().trim(),

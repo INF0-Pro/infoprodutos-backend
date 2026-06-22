@@ -41,7 +41,7 @@ class DeliveryWorker {
       const { data: sessions, error } = await supabase
         .from('payment_sessions')
         .select('id, status, delivery_unlocked_at, product_id, customer_email')
-        .in('status', ['PAYMENT_CONFIRMED', 'UPSELL_ACCEPTED', 'UPSELL_DECLINED'])
+        .in('status', ['UPSELL_ACCEPTED', 'UPSELL_DECLINED'])
         .is('delivery_unlocked_at', null)
         .order('created_at', { ascending: true })
         .limit(10);

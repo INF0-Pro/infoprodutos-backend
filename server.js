@@ -19,6 +19,7 @@ const upsellRoutes = require('./routes/upsellRoutes');
 const deliveryRoutes = require('./routes/deliveryRoutes');
 const trackingRoutes = require('./routes/trackingRoutes');
 const diagnosticsRoutes = require('./routes/diagnosticsRoutes');
+const funnelRoutes = require('./routes/funnelRoutes');
 
 // 🔥 PASSO 3 - PUBLIC CHECKOUT
 const publicCheckoutRoutes = require('./routes/publicCheckout');
@@ -75,6 +76,7 @@ app.use((req, res, next) => {
 // STATIC FRONTEND
 // =========================
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // =========================
 // ROUTES
@@ -82,6 +84,8 @@ app.use(express.static(path.join(__dirname, '..', 'frontend')));
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/checkouts', checkoutRoutes);
+app.use('/api/funnels', funnelRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // 🔥 PASSO 3 - CHECKOUT PÚBLICO AUTOMÁTICO
 app.use('/api/public/checkout', publicCheckoutRoutes);

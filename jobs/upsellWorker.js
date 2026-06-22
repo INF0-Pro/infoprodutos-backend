@@ -1,4 +1,6 @@
 const { supabase } = require('../config/database');
+const paymentService = require('../services/paymentService');
+const deliveryService = require('../services/deliveryService');
 const { applicationLogger, errorsLogger } = require('../config/logger');
 
 class UpsellWorker {
@@ -35,12 +37,12 @@ class UpsellWorker {
     try {
       const now = new Date().toISOString();
 
-      // Find UPSELL_PENDING sessions that have expired (30 min timeout)
+      // Find UPSELL_PENDING sessions whose real offer timer expired.
       const { data: timedOutSessions, error } = await supabase
         .from('payment_sessions')
-        .select('id, customer_email, upsell_status')
+        .select('id, customer_email, upsell_status, upsell_expires_at')
         .eq('status', 'UPSELL_PENDING')
-        .lt('updated_at', new Date(Date.now() - 30 * 60 * 1000).toISOString());
+        .lt('upsell_expires_at', now);
 
       if (error) throw error;
 
@@ -49,15 +51,12 @@ class UpsellWorker {
 
         for (const session of timedOutSessions) {
           try {
-            // Mark as declined (timeout = decline)
-            await supabase
-              .from('payment_sessions')
-              .update({
-                status: 'UPSELL_DECLINED',
-                upsell_status: 'timed_out',
-                updated_at: now,
-              })
-              .eq('id', session.id);
+            await paymentService.transitionState(session.id, 'UPSELL_DECLINED', {
+              upsell_status: 'timed_out',
+              upsell_resolved_at: now,
+            });
+
+            await deliveryService.getOrCreateDelivery(session.id);
 
             applicationLogger.info('Upsell timed out', { sessionId: session.id });
           } catch (err) {

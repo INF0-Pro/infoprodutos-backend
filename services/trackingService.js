@@ -14,6 +14,7 @@ class TrackingService {
         session_id: data.session_id || null,
         customer_email: data.customer_email || null,
         product_id: data.product_id || null,
+        funnel_id: data.funnel_id || null,
         metadata: data.metadata || {},
         ip_address: data.ip_address || null,
         user_agent: data.user_agent || null,
@@ -134,11 +135,14 @@ class TrackingService {
       const stats = {
         total_sessions: new Set(events.map(e => e.session_id)).size,
         checkout_opened: 0,
+        form_started: 0,
+        form_completed: 0,
         payment_session_created: 0,
         waiting_payment: 0,
         payment_confirmed: 0,
         upsell_viewed: 0,
         upsell_accepted: 0,
+        upsell_declined: 0,
         delivery_opened: 0,
         product_downloaded: 0,
       };
@@ -157,6 +161,12 @@ class TrackingService {
             case 'checkout_opened':
               stats.checkout_opened++;
               break;
+            case 'form_started':
+              stats.form_started++;
+              break;
+            case 'form_completed':
+              stats.form_completed++;
+              break;
             case 'payment_session_created':
               stats.payment_session_created++;
               break;
@@ -172,6 +182,9 @@ class TrackingService {
             case 'upsell_accepted':
               stats.upsell_accepted++;
               break;
+            case 'upsell_declined':
+              stats.upsell_declined++;
+              break;
             case 'delivery_opened':
               stats.delivery_opened++;
               break;
@@ -185,7 +198,10 @@ class TrackingService {
       // Calculate conversion rates
       stats.checkout_conversion = stats.total_sessions > 0 ? (stats.checkout_opened / stats.total_sessions) * 100 : 0;
       stats.payment_conversion = stats.checkout_opened > 0 ? (stats.payment_confirmed / stats.checkout_opened) * 100 : 0;
+      stats.upsell_conversion = stats.upsell_viewed > 0 ? (stats.upsell_accepted / stats.upsell_viewed) * 100 : 0;
       stats.delivery_conversion = stats.payment_confirmed > 0 ? (stats.delivery_opened / stats.payment_confirmed) * 100 : 0;
+      stats.checkout_abandonment = stats.checkout_opened > 0 ? ((stats.checkout_opened - stats.payment_session_created) / stats.checkout_opened) * 100 : 0;
+      stats.upsell_abandonment = stats.upsell_viewed > 0 ? ((stats.upsell_viewed - stats.upsell_accepted - stats.upsell_declined) / stats.upsell_viewed) * 100 : 0;
 
       return stats;
     } catch (err) {

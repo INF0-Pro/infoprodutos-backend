@@ -4,11 +4,14 @@ const paymentService = require('../services/paymentService');
 const { validateWebhook } = require('../middleware/validation');
 const { macrodroidLogger, errorsLogger } = require('../config/logger');
 
+function hasValidWebhookToken(req) {
+  const token = req.headers['x-webhook-token'];
+  return token && token === process.env.MACRODROID_WEBHOOK_TOKEN;
+}
+
 // POST /api/webhook/macrodroid/payment
 router.post('/macrodroid/payment', validateWebhook, async (req, res) => {
-  const token = req.headers['x-webhook-token'];
-
-  if (!token || token !== process.env.MACRODROID_WEBHOOK_TOKEN) {
+  if (!hasValidWebhookToken(req)) {
     macrodroidLogger.warn('Invalid webhook token attempt', { ip: req.ip });
     return res.status(401).json({ error: 'Invalid webhook token' });
   }
@@ -49,7 +52,10 @@ router.post('/macrodroid/payment', validateWebhook, async (req, res) => {
     /**
      * 🔥 PROCESSAMENTO NORMAL
      */
-    const result = await paymentService.processPaymentWebhook(payload);
+    const result = await paymentService.processPaymentWebhook({
+      ...payload,
+      fingerprint
+    });
 
     macrodroidLogger.info('Webhook processed', {
       result,
@@ -71,11 +77,17 @@ router.post('/macrodroid/payment', validateWebhook, async (req, res) => {
 
 // DEBUG
 router.post('/macrodroid/debug', async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || !hasValidWebhookToken(req)) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+
   try {
     const result = await paymentService.processPaymentWebhook({
       amount: req.body.amount,
       entity: req.body.entity,
       reference: req.body.reference,
+      received_at: req.body.received_at || new Date().toISOString(),
+      raw_message: req.body.raw_message || 'debug',
       sim_slot: req.body.sim_slot || null,
       payment_channel_id: req.body.payment_channel_id || null
     });

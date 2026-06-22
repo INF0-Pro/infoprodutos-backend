@@ -11,6 +11,15 @@ class DeliveryService {
     return crypto.randomBytes(32).toString('hex');
   }
 
+  async getOrCreateDelivery(sessionId) {
+    const existing = await this.getDeliveryBySession(sessionId);
+    if (existing && existing.status === 'unlocked') {
+      return existing;
+    }
+
+    return this.unlockDelivery(sessionId);
+  }
+
   /**
    * Unlock delivery for a session
    */
@@ -26,8 +35,8 @@ class DeliveryService {
         throw new Error('Session not found');
       }
 
-      // Only deliver if PAYMENT_CONFIRMED, UPSELL_ACCEPTED, or UPSELL_DECLINED
-      const allowedStatuses = ['PAYMENT_CONFIRMED', 'UPSELL_ACCEPTED', 'UPSELL_DECLINED', 'DELIVERED'];
+      // Production rule: payment confirmation alone never unlocks delivery.
+      const allowedStatuses = ['UPSELL_ACCEPTED', 'UPSELL_DECLINED', 'DELIVERED'];
       if (!allowedStatuses.includes(session.status)) {
         throw new Error(`Cannot deliver: session status is ${session.status}`);
       }
@@ -57,14 +66,10 @@ class DeliveryService {
 
       // Update session to DELIVERED if not already
       if (session.status !== 'DELIVERED') {
-        await supabase
-          .from('payment_sessions')
-          .update({
-            status: 'DELIVERED',
-            delivery_unlocked_at: now,
-            updated_at: now,
-          })
-          .eq('id', sessionId);
+        const paymentService = require('./paymentService');
+        await paymentService.transitionState(sessionId, 'DELIVERED', {
+          delivery_unlocked_at: now,
+        });
       }
 
       deliveriesLogger.info('Delivery unlocked', { sessionId, deliveryId: delivery.id });
@@ -110,35 +115,23 @@ class DeliveryService {
    */
   async recordDownload(deliveryId, ipAddress) {
     try {
-      const { data, error } = await supabase
+      const { data: current } = await supabase
+        .from('deliveries')
+        .select('download_count')
+        .eq('id', deliveryId)
+        .single();
+
+      const newCount = (current?.download_count || 0) + 1;
+      const { error } = await supabase
         .from('deliveries')
         .update({
           downloaded_at: new Date().toISOString(),
           download_ip: ipAddress,
-          download_count: supabase.rpc('increment', { x: 1 }),
+          download_count: newCount,
         })
-        .eq('id', deliveryId)
-        .select()
-        .single();
+        .eq('id', deliveryId);
 
-      if (error) {
-        // Fallback: increment manually
-        const { data: current } = await supabase
-          .from('deliveries')
-          .select('download_count')
-          .eq('id', deliveryId)
-          .single();
-
-        const newCount = (current?.download_count || 0) + 1;
-        await supabase
-          .from('deliveries')
-          .update({
-            downloaded_at: new Date().toISOString(),
-            download_ip: ipAddress,
-            download_count: newCount,
-          })
-          .eq('id', deliveryId);
-      }
+      if (error) throw error;
 
       deliveriesLogger.info('Product downloaded', { deliveryId, ipAddress });
     } catch (err) {
